@@ -1,0 +1,9 @@
+{
+  "classes": [
+    "Angry",
+    "Other",
+    "Sad",
+    "happy"
+  ],
+  "img_size": 224
+}

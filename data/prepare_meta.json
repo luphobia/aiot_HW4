@@ -1,0 +1,17 @@
+{
+  "dataset_slug": "anshtanwar/pets-facial-expression-dataset",
+  "out_dir": "D:\\VSCode\\HW4\\data",
+  "val_ratio": 0.15,
+  "seed": 42,
+  "labels": [
+    "Angry",
+    "Other",
+    "Sad",
+    "happy"
+  ],
+  "stats": {
+    "total": 1000,
+    "train": 852,
+    "val": 148
+  }
+}

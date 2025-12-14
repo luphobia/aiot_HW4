@@ -1,0 +1,9 @@
+streamlit
+torch
+torchvision
+tqdm
+pillow
+numpy
+kagglehub
+ultralytics
+opencv-python

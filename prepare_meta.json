@@ -1,0 +1,23 @@
+{
+  "dataset_slug": "anshtanwar/pets-facial-expression-dataset",
+  "val_ratio": 0.15,
+  "seed": 42,
+  "yolo_model": "yolov8n.pt",
+  "conf_thres": 0.25,
+  "ambiguous_margin": 0.05,
+  "prefer": null,
+  "labels": [
+    "Angry",
+    "Other",
+    "Sad",
+    "happy"
+  ],
+  "stats": {
+    "dog": 345,
+    "cat": 183,
+    "unknown": 460,
+    "ambiguous": 12,
+    "bad_image": 0,
+    "total": 1000
+  }
+}
