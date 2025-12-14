@@ -2,6 +2,9 @@
 
 This project is a pet emotion classifier that can predict the emotion of a cat or dog from an image. It uses a deep learning model trained on a dataset of pet facial expressions. The application is built with Streamlit and uses a YOLOv8 model for object detection.
 
+## streamlit demosite
+https://aiothw4-pet-emotion-classifier.streamlit.app/
+
 ## Features
 
 -   Web interface for uploading images or selecting sample images.
