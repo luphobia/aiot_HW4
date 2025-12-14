@@ -9,17 +9,16 @@ import torch
 import torch.nn.functional as F
 from torchvision import transforms, models
 
-from detector import PetDetector
-
 
 # ----------------------------
 # Page + CSS (bigger uploader + buttons)
 # ----------------------------
 st.set_page_config(page_title="Pet Emotion Classifier", layout="centered")
 st.title("🐾 寵物情緒/表情辨識 Demo（單模型版）")
-st.caption("流程：可選偵測裁切 ROI → 單一情緒模型推論 → 顯示 Top-K + 全部類別機率")
+st.caption("上傳圖片 →（可選）自動主體裁切 → 輸出四種情緒機率分布")
 
-st.markdown("""
+st.markdown(
+    """
 <style>
 /* 放大 file_uploader */
 div[data-testid="stFileUploader"] section {
@@ -39,7 +38,9 @@ div.stButton > button {
     padding: 10px 14px !important;
 }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
 # ----------------------------
@@ -72,12 +73,16 @@ def load_latest_model(models_dir: str = "models", prefix: str = "pet_emotion"):
 
 
 def preprocess(img: Image.Image, img_size: int):
-    tf = transforms.Compose([
-        transforms.Resize((img_size, img_size)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225]),
-    ])
+    tf = transforms.Compose(
+        [
+            transforms.Resize((img_size, img_size)),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225],
+            ),
+        ]
+    )
     return tf(img).unsqueeze(0)
 
 
@@ -87,6 +92,16 @@ def predict_all(model, classes, img: Image.Image, img_size: int):
     logits = model(x)
     probs = F.softmax(logits, dim=1).cpu().numpy().reshape(-1)
     return {classes[i]: float(probs[i]) for i in range(len(classes))}
+
+
+def normalize_label(s: str) -> str:
+    """
+    把標籤統一成小寫，並簡單處理 other/others 這種常見差異
+    """
+    s2 = (s or "").strip().lower()
+    if s2 == "others":
+        return "other"
+    return s2
 
 
 # ----------------------------
@@ -103,13 +118,18 @@ if model is None:
     )
     st.stop()
 
-with st.expander("🔎 目前載入的模型資訊（classes / 檔案）", expanded=False):
+# 固定顯示 4 類（依你的需求）
+# 會用 normalize_label 對齊 classes 名稱
+DISPLAY_CLASSES = ["happy", "sad", "angry", "other"]
+
+# 顯示用：檢查模型實際 classes
+with st.expander("🔎 模型資訊（classes / 檔案）", expanded=False):
     st.write("classes:", classes)
     st.write("model:", model_path)
     st.write("meta:", meta_path)
-
-# Detector (YOLO) - 用來裁切 ROI（可關閉）
-detector = PetDetector("yolov8n.pt")
+    missing = [c for c in DISPLAY_CLASSES if c not in [normalize_label(x) for x in classes]]
+    if missing:
+        st.warning(f"注意：模型 classes 內找不到以下類別：{missing}（可能命名不同或訓練資料夾名稱不一致）")
 
 
 # ----------------------------
@@ -120,24 +140,22 @@ st.subheader("輸入圖片")
 colA, colB = st.columns([2, 1])
 
 with colA:
-    uploaded = st.file_uploader("上傳寵物照片（jpg/png）", type=["jpg", "jpeg", "png"])
+    uploaded = st.file_uploader("上傳寵物照片（jpg/png）", type=["jpg", "jpeg", "png", "webp"])
 
 with colB:
     sample_files = sorted(
-        glob.glob("samples/*.jpg") +
-        glob.glob("samples/*.jpeg") +
-        glob.glob("samples/*.png") +
-        glob.glob("samples/*.webp")
+        glob.glob("samples/*.jpg")
+        + glob.glob("samples/*.jpeg")
+        + glob.glob("samples/*.png")
+        + glob.glob("samples/*.webp")
     )
     sample_options = ["（不使用）"] + [os.path.basename(p) for p in sample_files]
     sample_name = st.selectbox("或選擇範例圖片", sample_options)
-
     use_sample = st.button("用範例圖片測試", use_container_width=True)
-    # show_roi = st.checkbox("顯示裁切 ROI", value=True)
-    use_detect = st.checkbox("啟用偵測與 ROI 裁切（建議）", value=True)
 
-# topk = st.slider("顯示 Top-K", min_value=1, max_value=min(10, len(classes)), value=min(3, len(classes)))
-conf_thres = st.slider("偵測信心閾值", min_value=0.05, max_value=0.90, value=0.25, step=0.05)
+    # ROI 裁切選項：不顯示 ROI、不顯示 cat/dog，只當成內部前處理
+    use_detect = st.checkbox("啟用自動主體裁切（建議）", value=True)
+    conf_thres = st.slider("裁切偵測信心閾值", min_value=0.05, max_value=0.90, value=0.25, step=0.05)
 
 img = None
 img_source = None
@@ -156,34 +174,62 @@ if img is None:
 
 # Fix EXIF rotation
 img = ImageOps.exif_transpose(img)
-st.image(img, caption=f"{img_source}（原始輸入圖片）", use_container_width=True)
+
+st.image(img, caption=f"{img_source}", use_container_width=True)
 
 
 # ----------------------------
-# Optional detect + ROI crop
+# Optional detect + ROI crop (lazy import, cloud-safe)
 # ----------------------------
 roi_img = img
+
+detector = None
 if use_detect:
-    det = detector.detect_and_crop(img, conf_thres=conf_thres, pad_ratio=0.10)
-    roi_img = det.crop
+    try:
+        # Lazy import: 避免部署環境因 cv2/ultralytics 直接掛掉
+        from detector import PetDetector  # noqa: F401
+
+        detector = PetDetector("yolov8n.pt")
+    except Exception:
+        # 不顯示錯誤細節（雲端常會 redacted），只做降級提示
+        st.warning("自動主體裁切在目前部署環境無法啟用，已改用原圖進行推論。")
+        detector = None
+        use_detect = False
+
+if use_detect and detector is not None:
+    try:
+        det = detector.detect_and_crop(img, conf_thres=conf_thres, pad_ratio=0.10)
+        roi_img = det.crop
+    except Exception:
+        # 裁切失敗也要能回退，不影響主流程
+        roi_img = img
 
 
 # ----------------------------
-# Predict: TopK + full probabilities
+# Predict: fixed 4 classes + full table + bar chart
 # ----------------------------
-probs_dict = predict_all(model, classes, roi_img, img_size)
-items = sorted(probs_dict.items(), key=lambda x: x[1], reverse=True)
+raw_probs = predict_all(model, classes, roi_img, img_size)
+
+# 將模型輸出映射到固定四類（以 normalize_label 對齊）
+norm_map = {normalize_label(k): v for k, v in raw_probs.items()}
+
+# 若模型本身類別命名不同（例如 Other/others），這裡會盡量對齊
+fixed_items = []
+for c in DISPLAY_CLASSES:
+    fixed_items.append((c, float(norm_map.get(c, 0.0))))
+
+# 依機率高到低排序顯示（但永遠顯示四類）
+fixed_items_sorted = sorted(fixed_items, key=lambda x: x[1], reverse=True)
 
 st.subheader("推論結果（四種情緒機率）")
-for label, p in items:
-    st.write(f"**{label}**：{p*100:.2f}%")
-
+for label, p in fixed_items_sorted:
+    st.write(f"**{label}**：{p * 100:.2f}%")
 
 st.divider()
-st.caption("完整類別機率（查看所有類別機率分布）")
+st.caption("完整機率表與圖表（固定四類）")
 
-df = pd.DataFrame(items, columns=["label", "prob"])
+df = pd.DataFrame(fixed_items_sorted, columns=["label", "prob"])
 df["prob_%"] = df["prob"] * 100.0
-st.dataframe(df[["label", "prob_%"]], use_container_width=True, hide_index=True)
 
+st.dataframe(df[["label", "prob_%"]], use_container_width=True, hide_index=True)
 st.bar_chart(df.set_index("label")[["prob_%"]])
